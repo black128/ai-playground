@@ -1,40 +1,633 @@
 from __future__ import annotations
 
-import math
-import tkinter as tk
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import threading
+import time
+from typing import Any
+import webbrowser
 
-from snake_game.engine import (
-    DIRECTIONS,
-    DOWN,
-    GameConfig,
-    LEFT,
-    RIGHT,
-    SnakeGame,
-    TickResult,
-    UP,
-)
+from snake_game.engine import DIRECTIONS, GameConfig, SnakeGame, TickResult
 from snake_game.storage import ScoreStorage
 
+HTML_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snake Arcade</title>
+  <style>
+    :root {
+      --bg: #091218;
+      --panel: rgba(12, 27, 35, 0.88);
+      --panel-border: rgba(120, 200, 180, 0.28);
+      --text: #ecfff9;
+      --muted: #9ec2b8;
+      --accent: #8ff76d;
+      --warm: #ffd166;
+      --danger: #ff7b6b;
+      --grid-a: #10202a;
+      --grid-b: #0a161d;
+    }
 
-class SnakeApp:
-    CELL_SIZE = 24
-    FRAME_DELAY_MS = 33
-    BG_COLOR = "#101418"
-    PANEL_COLOR = "#172128"
-    PANEL_ALT_COLOR = "#22313b"
-    BOARD_BORDER_COLOR = "#78c8b4"
-    GRID_LIGHT_COLOR = "#132027"
-    GRID_DARK_COLOR = "#0d181e"
-    SNAKE_HEAD_COLOR = "#8ff76d"
-    SNAKE_BODY_START = "#3dcf75"
-    SNAKE_BODY_END = "#176f56"
-    FOOD_COLOR = "#ff7b6b"
-    FOOD_CORE_COLOR = "#ffe4a8"
-    TEXT_COLOR = "#edf8f5"
-    MUTED_TEXT_COLOR = "#9cb5ae"
-    OVERLAY_COLOR = "#081014"
-    BANNER_COLOR = "#f7c948"
+    * { box-sizing: border-box; }
 
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(143, 247, 109, 0.15), transparent 26%),
+        radial-gradient(circle at top right, rgba(255, 209, 102, 0.12), transparent 24%),
+        linear-gradient(180deg, #0a151c 0%, #071015 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+    }
+
+    .shell {
+      width: min(1120px, 100%);
+      display: grid;
+      grid-template-columns: minmax(320px, 760px) 320px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .stage,
+    .sidebar {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+    }
+
+    .stage {
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 0.95;
+      letter-spacing: -0.05em;
+    }
+
+    .title-block p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--warm);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .board-wrap {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      width: 100%;
+      border-radius: 22px;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.03), transparent),
+        linear-gradient(180deg, #0d1b22 0%, #091218 100%);
+      border: 1px solid rgba(120, 200, 180, 0.28);
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      padding: 24px;
+      background: linear-gradient(180deg, rgba(4, 9, 12, 0.08), rgba(4, 9, 12, 0.5));
+      opacity: 0;
+      transition: opacity 180ms ease;
+    }
+
+    .overlay.visible {
+      opacity: 1;
+    }
+
+    .overlay-card {
+      width: min(480px, 100%);
+      background: rgba(5, 12, 16, 0.82);
+      border: 1px solid rgba(143, 247, 109, 0.18);
+      border-radius: 22px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.3);
+    }
+
+    .overlay-card h2 {
+      margin: 0;
+      font-size: 34px;
+      letter-spacing: -0.04em;
+    }
+
+    .overlay-card p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .footer {
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .sidebar {
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .metric .value {
+      margin-top: 6px;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.05em;
+    }
+
+    .section h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--muted);
+    }
+
+    .status-line {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .status-help {
+      margin-top: 8px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .level-bar {
+      margin-top: 12px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      overflow: hidden;
+    }
+
+    .level-bar > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #8ff76d, #ffd166);
+      transition: width 150ms linear;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .control {
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .control strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--warm);
+    }
+
+    .control span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .banner {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: linear-gradient(90deg, rgba(143, 247, 109, 0.12), rgba(255, 209, 102, 0.08));
+      border: 1px solid rgba(255, 209, 102, 0.18);
+      color: var(--warm);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      opacity: 0;
+      transition: opacity 160ms ease;
+    }
+
+    .banner.visible {
+      opacity: 1;
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        order: -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="stage">
+      <div class="topbar">
+        <div class="title-block">
+          <h1>Snake Arcade</h1>
+          <p>Python powered. Browser rendered. Reliable on this machine.</p>
+        </div>
+        <div class="pill" id="speed-pill">Speed 180ms</div>
+      </div>
+      <div class="board-wrap">
+        <canvas id="board" width="720" height="720"></canvas>
+        <div class="overlay visible" id="overlay">
+          <div class="overlay-card">
+            <h2 id="overlay-title">Press an arrow key to start</h2>
+            <p id="overlay-text">The Tk window renderer is bypassed here. This is the stable full product view.</p>
+          </div>
+        </div>
+      </div>
+      <div class="footer">
+        <span id="footer-left">Eat 4 foods to level up.</span>
+        <span id="footer-right">Arrow keys or WASD to move</span>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="metric-grid">
+        <div class="metric"><div class="label">Score</div><div class="value" id="score-value">0000</div></div>
+        <div class="metric"><div class="label">Best</div><div class="value" id="best-value">0000</div></div>
+        <div class="metric"><div class="label">Level</div><div class="value" id="level-value">1</div></div>
+        <div class="metric"><div class="label">Length</div><div class="value" id="length-value">3</div></div>
+      </div>
+
+      <div class="section">
+        <h3>Status</h3>
+        <div class="status-line" id="status-line">Ready</div>
+        <div class="status-help" id="status-help">The game polls local Python state and renders at 60fps here in the browser.</div>
+        <div class="level-bar"><span id="level-progress"></span></div>
+      </div>
+
+      <div class="banner" id="banner">Level Up</div>
+
+      <div class="section">
+        <h3>Controls</h3>
+        <div class="controls">
+          <div class="control"><strong>Arrow / WASD</strong><span>Move and auto-start the run</span></div>
+          <div class="control"><strong>Space</strong><span>Pause or resume</span></div>
+          <div class="control"><strong>Enter</strong><span>Start a new round</span></div>
+          <div class="control"><strong>R</strong><span>Reset instantly</span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("board");
+    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlay-title");
+    const overlayText = document.getElementById("overlay-text");
+    const banner = document.getElementById("banner");
+    const scoreValue = document.getElementById("score-value");
+    const bestValue = document.getElementById("best-value");
+    const levelValue = document.getElementById("level-value");
+    const lengthValue = document.getElementById("length-value");
+    const speedPill = document.getElementById("speed-pill");
+    const statusLine = document.getElementById("status-line");
+    const statusHelp = document.getElementById("status-help");
+    const levelProgress = document.getElementById("level-progress");
+    const footerLeft = document.getElementById("footer-left");
+    const footerRight = document.getElementById("footer-right");
+
+    const state = {
+      width: 20,
+      height: 20,
+      snake: [],
+      food: null,
+      score: 0,
+      best_score: 0,
+      level: 1,
+      speed_ms: 180,
+      started: false,
+      running: false,
+      game_over: false,
+      won: false,
+      foods_per_level: 4,
+      progress_to_next_level: 0,
+      level_up_flash: 0,
+      tick: 0
+    };
+
+    let particles = [];
+    let lastFoodKey = null;
+
+    function pad(num) {
+      return String(num).padStart(4, "0");
+    }
+
+    async function postAction(action, payload = {}) {
+      await fetch("/api/action", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action, ...payload})
+      });
+    }
+
+    async function pollState() {
+      try {
+        const response = await fetch("/api/state", {cache: "no-store"});
+        const next = await response.json();
+        const hadFood = state.food ? `${state.food[0]}:${state.food[1]}` : null;
+        const hasFood = next.food ? `${next.food[0]}:${next.food[1]}` : null;
+        if (hadFood && hasFood && hadFood !== hasFood) {
+          spawnParticles(state.food);
+        }
+        Object.assign(state, next);
+        if (state.level_up_flash > 0) {
+          banner.classList.add("visible");
+          banner.textContent = `Level ${state.level} unlocked`;
+        } else {
+          banner.classList.remove("visible");
+        }
+        updateHud();
+      } catch (error) {
+        statusLine.textContent = "Connection lost";
+        statusHelp.textContent = "Local Python server is not responding.";
+      }
+    }
+
+    function updateHud() {
+      scoreValue.textContent = pad(state.score);
+      bestValue.textContent = pad(state.best_score);
+      levelValue.textContent = String(state.level);
+      lengthValue.textContent = String(state.snake.length || 0);
+      speedPill.textContent = `Speed ${state.speed_ms}ms`;
+      levelProgress.style.width = `${(state.progress_to_next_level / state.foods_per_level) * 100}%`;
+
+      if (!state.started) {
+        statusLine.textContent = "Ready";
+        statusHelp.textContent = "Press an arrow key or WASD to start.";
+        footerLeft.textContent = `Eat ${state.foods_per_level} foods to level up.`;
+        showOverlay("Press an arrow key to start", "Space pauses, Enter starts a fresh run, R resets.");
+      } else if (state.won) {
+        statusLine.textContent = "Board cleared";
+        statusHelp.textContent = "You filled the whole board. Enter or R starts again.";
+        footerLeft.textContent = "Perfect clear achieved.";
+        showOverlay("Board cleared", "Every cell is yours now. Press Enter or R for another run.");
+      } else if (state.game_over) {
+        statusLine.textContent = "Game over";
+        statusHelp.textContent = "One more run? Enter or R restarts instantly.";
+        footerLeft.textContent = "The speed curve keeps ramping each level.";
+        showOverlay("Game over", "You crashed. Press Enter or R to restart.");
+      } else if (!state.running) {
+        statusLine.textContent = "Paused";
+        statusHelp.textContent = "Press Space to continue the run.";
+        footerLeft.textContent = "Take a breath and jump back in.";
+        showOverlay("Paused", "Press Space to continue.");
+      } else {
+        const remaining = state.foods_per_level - state.progress_to_next_level;
+        statusLine.textContent = "Running";
+        statusHelp.textContent = `${remaining} more food${remaining === 1 ? "" : "s"} to level ${state.level + 1}.`;
+        footerLeft.textContent = `${remaining} more food${remaining === 1 ? "" : "s"} to level up.`;
+        hideOverlay();
+      }
+      footerRight.textContent = "Arrow keys / WASD move, Space pauses, R resets";
+    }
+
+    function showOverlay(title, text) {
+      overlay.classList.add("visible");
+      overlayTitle.textContent = title;
+      overlayText.textContent = text;
+    }
+
+    function hideOverlay() {
+      overlay.classList.remove("visible");
+    }
+
+    function spawnParticles(position) {
+      if (!position) return;
+      for (let i = 0; i < 14; i += 1) {
+        const angle = (Math.PI * 2 * i) / 14;
+        particles.push({
+          x: position[0] + 0.5,
+          y: position[1] + 0.5,
+          dx: Math.cos(angle) * (0.035 + (i % 3) * 0.012),
+          dy: Math.sin(angle) * (0.035 + (i % 4) * 0.01),
+          life: 1,
+          color: i % 2 === 0 ? "#ffd166" : "#ff7b6b"
+        });
+      }
+    }
+
+    function updateParticles() {
+      particles = particles.filter((particle) => particle.life > 0).map((particle) => ({
+        ...particle,
+        x: particle.x + particle.dx,
+        y: particle.y + particle.dy,
+        dy: particle.dy + 0.0008,
+        life: particle.life - 0.025
+      }));
+    }
+
+    function blend(a, b, factor) {
+      const pa = parseInt(a.slice(1), 16);
+      const pb = parseInt(b.slice(1), 16);
+      const ra = (pa >> 16) & 255, ga = (pa >> 8) & 255, ba = pa & 255;
+      const rb = (pb >> 16) & 255, gb = (pb >> 8) & 255, bb = pb & 255;
+      const r = Math.round(ra + (rb - ra) * factor);
+      const g = Math.round(ga + (gb - ga) * factor);
+      const b2 = Math.round(ba + (bb - ba) * factor);
+      return `rgb(${r}, ${g}, ${b2})`;
+    }
+
+    function drawBoard(timestamp) {
+      const size = Math.min(canvas.clientWidth, canvas.clientHeight);
+      if (canvas.width !== size || canvas.height !== size) {
+        canvas.width = size;
+        canvas.height = size;
+      }
+
+      const cell = size / state.width;
+      ctx.clearRect(0, 0, size, size);
+
+      for (let y = 0; y < state.height; y += 1) {
+        for (let x = 0; x < state.width; x += 1) {
+          ctx.fillStyle = (x + y) % 2 === 0 ? "#10202a" : "#0a161d";
+          ctx.fillRect(x * cell, y * cell, cell, cell);
+          ctx.strokeStyle = "rgba(255,255,255,0.03)";
+          ctx.strokeRect(x * cell, y * cell, cell, cell);
+        }
+      }
+
+      if (state.food) {
+        const pulse = 0.72 + ((Math.sin(timestamp / 180) + 1) / 2) * 0.22;
+        const cx = (state.food[0] + 0.5) * cell;
+        const cy = (state.food[1] + 0.5) * cell;
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(255, 123, 107, 0.18)";
+        ctx.arc(cx, cy, cell * pulse * 0.48, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.fillStyle = "#ff7b6b";
+        ctx.arc(cx, cy, cell * pulse * 0.28, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.fillStyle = "#ffe4a8";
+        ctx.arc(cx + cell * 0.08, cy - cell * 0.08, cell * 0.09, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      state.snake.forEach((segment, index) => {
+        const x = segment[0] * cell;
+        const y = segment[1] * cell;
+        const inset = index === 0 ? cell * 0.1 : cell * 0.14;
+        ctx.fillStyle = index === 0 ? "#8ff76d" : blend("#3dcf75", "#176f56", index / Math.max(state.snake.length - 1, 1));
+        ctx.strokeStyle = index === 0 ? "#d9ffcc" : "#12553f";
+        ctx.lineWidth = 2;
+        roundRect(ctx, x + inset, y + inset, cell - inset * 2, cell - inset * 2, Math.max(6, cell * 0.22));
+        ctx.fill();
+        ctx.stroke();
+
+        if (index === 0) {
+          drawEyes(segment, cell);
+        }
+      });
+
+      updateParticles();
+      particles.forEach((particle) => {
+        ctx.beginPath();
+        ctx.fillStyle = particle.color;
+        ctx.globalAlpha = Math.max(0, particle.life);
+        ctx.arc(particle.x * cell, particle.y * cell, cell * 0.08 * Math.max(0.6, particle.life), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      requestAnimationFrame(drawBoard);
+    }
+
+    function drawEyes(segment, cell) {
+      let eyes;
+      switch (state.direction) {
+        case "Up":
+          eyes = [[-0.14, -0.12], [0.14, -0.12]];
+          break;
+        case "Down":
+          eyes = [[-0.14, 0.12], [0.14, 0.12]];
+          break;
+        case "Left":
+          eyes = [[-0.12, -0.14], [-0.12, 0.14]];
+          break;
+        default:
+          eyes = [[0.12, -0.14], [0.12, 0.14]];
+      }
+      eyes.forEach(([dx, dy]) => {
+        ctx.beginPath();
+        ctx.fillStyle = "#0b150d";
+        ctx.arc((segment[0] + 0.5 + dx) * cell, (segment[1] + 0.5 + dy) * cell, cell * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + width, y, x + width, y + height, radius);
+      ctx.arcTo(x + width, y + height, x, y + height, radius);
+      ctx.arcTo(x, y + height, x, y, radius);
+      ctx.arcTo(x, y, x + width, y, radius);
+      ctx.closePath();
+    }
+
+    document.addEventListener("keydown", async (event) => {
+      const key = event.key;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter", "r", "R", "w", "W", "a", "A", "s", "S", "d", "D"].includes(key)) {
+        event.preventDefault();
+      }
+      if (key === " ") {
+        await postAction("pause");
+      } else if (key === "Enter") {
+        await postAction("start");
+      } else if (key === "r" || key === "R") {
+        await postAction("reset");
+      } else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "W", "a", "A", "s", "S", "d", "D"].includes(key)) {
+        await postAction("direction", {key});
+      }
+      pollState();
+    });
+
+    setInterval(pollState, 80);
+    pollState();
+    requestAnimationFrame(drawBoard);
+  </script>
+</body>
+</html>
+"""
+
+
+class BrowserSnakeController:
     KEY_ALIASES = {
         "w": "Up",
         "W": "Up",
@@ -50,480 +643,171 @@ class SnakeApp:
         self.game = SnakeGame(GameConfig(width=20, height=20, initial_length=3))
         self.score_storage = ScoreStorage()
         self.best_score = self.score_storage.load_best_score()
-        self.running = False
         self.started = False
-        self.animation_frame = 0
-        self.level_banner_frames = 0
-        self.food_flash_frames = 0
-        self.particles: list[dict[str, float]] = []
-        self.logic_job: str | None = None
-        self.render_job: str | None = None
+        self.running = False
+        self.next_tick_at = time.monotonic()
+        self.level_up_flash = 0
+        self.tick_counter = 0
+        self.last_direction_name = "Right"
+        self._lock = threading.Lock()
 
-        self.root = tk.Tk()
-        self.root.title("Snake Arcade")
-        self.root.resizable(False, False)
-        self.root.configure(bg=self.BG_COLOR)
-        self.root.protocol("WM_DELETE_WINDOW", self._close)
+    def get_state(self) -> dict[str, Any]:
+        with self._lock:
+            self._advance_locked()
+            return self._state_locked()
 
-        board_width = self.game.width * self.CELL_SIZE
-        board_height = self.game.height * self.CELL_SIZE
-
-        self.title_var = tk.StringVar(value="Snake Arcade")
-        self.stats_var = tk.StringVar()
-        self.footer_var = tk.StringVar()
-
-        top_frame = tk.Frame(self.root, bg=self.BG_COLOR)
-        top_frame.pack(fill="x", padx=18, pady=(18, 10))
-
-        self.title_label = tk.Label(
-            top_frame,
-            textvariable=self.title_var,
-            font=("Helvetica", 22, "bold"),
-            fg=self.TEXT_COLOR,
-            bg=self.BG_COLOR,
-            anchor="w",
-        )
-        self.title_label.pack(fill="x")
-
-        self.stats_label = tk.Label(
-            top_frame,
-            textvariable=self.stats_var,
-            font=("Helvetica", 11, "bold"),
-            fg=self.MUTED_TEXT_COLOR,
-            bg=self.BG_COLOR,
-            anchor="w",
-            pady=4,
-        )
-        self.stats_label.pack(fill="x")
-
-        self.canvas = tk.Canvas(
-            self.root,
-            width=board_width,
-            height=board_height,
-            bg=self.GRID_DARK_COLOR,
-            highlightthickness=3,
-            highlightbackground=self.BOARD_BORDER_COLOR,
-        )
-        self.canvas.pack(padx=18, pady=0)
-
-        self.footer_label = tk.Label(
-            self.root,
-            textvariable=self.footer_var,
-            font=("Helvetica", 11),
-            fg=self.TEXT_COLOR,
-            bg=self.PANEL_COLOR,
-            anchor="w",
-            padx=16,
-            pady=10,
-        )
-        self.footer_label.pack(fill="x", padx=18, pady=(10, 18))
-
-        self.root.bind("<KeyPress>", self._handle_keypress)
-        self._show_window()
-        self._draw()
-        self._schedule_render()
-
-    def run(self) -> None:
-        self.root.mainloop()
-
-    def _handle_keypress(self, event: tk.Event) -> None:
-        keysym = self.KEY_ALIASES.get(event.keysym, event.keysym)
-        if keysym in DIRECTIONS:
-            if not self.started:
+    def handle_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if action == "start":
+                self._reset_locked()
                 self.started = True
                 self.running = True
-            self.game.change_direction_by_key(keysym)
-            self._schedule_logic_tick()
-            return
+                self.next_tick_at = time.monotonic() + (self.game.speed_ms / 1000)
+            elif action == "pause":
+                if self.started and not (self.game.game_over or self.game.won):
+                    self.running = not self.running
+                    if self.running:
+                        self.next_tick_at = time.monotonic() + (self.game.speed_ms / 1000)
+            elif action == "reset":
+                self._reset_locked()
+            elif action == "direction":
+                key = str(payload.get("key", ""))
+                direction_name = self.KEY_ALIASES.get(key, key.removeprefix("Arrow"))
+                if direction_name in DIRECTIONS:
+                    if not self.started:
+                        self.started = True
+                        self.running = True
+                    self.game.change_direction_by_key(direction_name)
+                    self.last_direction_name = direction_name
+                    self.next_tick_at = time.monotonic() + (self.game.speed_ms / 1000)
 
-        if event.keysym in ("Return", "KP_Enter"):
-            if not self.started or self.game.game_over or self.game.won:
-                self._reset_game()
-                self.started = True
-                self.running = True
-                self._schedule_logic_tick()
-            return
+            self._advance_locked()
+            return self._state_locked()
 
-        if event.keysym.lower() == "r":
-            self._reset_game()
-            return
+    def _advance_locked(self) -> None:
+        now = time.monotonic()
+        if self.level_up_flash > 0:
+            self.level_up_flash -= 1
 
-        if event.keysym == "space" and self.started and not (self.game.game_over or self.game.won):
-            self.running = not self.running
-            self._schedule_logic_tick()
-            return
+        while (
+            self.started
+            and self.running
+            and not (self.game.game_over or self.game.won)
+            and now >= self.next_tick_at
+        ):
+            result = self.game.tick()
+            self.tick_counter += 1
+            self._handle_tick_locked(result)
+            self.next_tick_at += self.game.speed_ms / 1000
 
-        if event.keysym == "Escape":
-            self._close()
-
-    def _show_window(self) -> None:
-        window_width = self.game.width * self.CELL_SIZE + 40
-        window_height = self.game.height * self.CELL_SIZE + 160
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        pos_x = max((screen_width - window_width) // 2, 0)
-        pos_y = max((screen_height - window_height) // 2, 0)
-        self.root.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
-        self.root.update_idletasks()
-        self.root.lift()
-        self.root.focus_force()
-        self.root.attributes("-topmost", True)
-        self.root.after(300, lambda: self.root.attributes("-topmost", False))
-
-    def _close(self) -> None:
-        if self.logic_job is not None:
-            self.root.after_cancel(self.logic_job)
-            self.logic_job = None
-        if self.render_job is not None:
-            self.root.after_cancel(self.render_job)
-            self.render_job = None
-        self.root.destroy()
-
-    def _reset_game(self) -> None:
-        self.game.reset()
-        self.running = False
-        self.started = False
-        self.level_banner_frames = 0
-        self.food_flash_frames = 0
-        self.particles.clear()
-        if self.logic_job is not None:
-            self.root.after_cancel(self.logic_job)
-            self.logic_job = None
-
-    def _schedule_logic_tick(self) -> None:
-        if self.logic_job is not None:
-            return
-        if not self.started or not self.running:
-            return
-        if self.game.game_over or self.game.won:
-            return
-        self.logic_job = self.root.after(self.game.speed_ms, self._game_loop)
-
-    def _game_loop(self) -> None:
-        self.logic_job = None
-        if not self.started or not self.running:
-            return
-        if self.game.game_over or self.game.won:
-            return
-
-        result = self.game.tick()
-        self._handle_tick_result(result)
-
-        if self.running and not (self.game.game_over or self.game.won):
-            self._schedule_logic_tick()
-
-    def _handle_tick_result(self, result: TickResult) -> None:
-        if result.ate_food and result.consumed_food_position is not None:
-            self.food_flash_frames = 9
-            self._spawn_particles(result.consumed_food_position)
-            self._persist_best_score()
-
+    def _handle_tick_locked(self, result: TickResult) -> None:
+        if result.ate_food:
+            self._persist_best_locked()
         if result.level_up:
-            self.level_banner_frames = 45
-
+            self.level_up_flash = 18
         if result.game_over or result.won:
             self.running = False
-            self._persist_best_score()
+            self._persist_best_locked()
 
-    def _schedule_render(self) -> None:
-        self.render_job = self.root.after(self.FRAME_DELAY_MS, self._render_frame)
+    def _reset_locked(self) -> None:
+        self.game.reset()
+        self.started = False
+        self.running = False
+        self.level_up_flash = 0
+        self.next_tick_at = time.monotonic()
+        self.tick_counter = 0
+        self.last_direction_name = "Right"
 
-    def _render_frame(self) -> None:
-        self.render_job = None
-        self.animation_frame += 1
-        if self.level_banner_frames > 0:
-            self.level_banner_frames -= 1
-        if self.food_flash_frames > 0:
-            self.food_flash_frames -= 1
-        self._advance_particles()
-        self._draw()
-        self._schedule_render()
-
-    def _draw(self) -> None:
-        self.canvas.delete("all")
-        self._draw_grid()
-        self._draw_particles()
-        self._draw_food()
-        self._draw_snake()
-        self._draw_level_banner()
-        self._draw_overlay()
-        self._update_hud()
-
-    def _draw_grid(self) -> None:
-        pulse = 0.1 * math.sin(self.animation_frame / 12)
-        for x in range(self.game.width):
-            for y in range(self.game.height):
-                base = self.GRID_LIGHT_COLOR if (x + y) % 2 == 0 else self.GRID_DARK_COLOR
-                factor = max(0.0, min(1.0, 0.12 + pulse))
-                color = self._blend_color(base, self.PANEL_ALT_COLOR, factor)
-                self._draw_cell(
-                    x,
-                    y,
-                    color,
-                    inset=0,
-                    outline="#0c2a2f",
-                    outline_width=1,
-                )
-
-    def _draw_food(self) -> None:
-        if self.game.food is None:
-            return
-
-        food_x, food_y = self.game.food
-        pulse = (math.sin(self.animation_frame / 3) + 1) / 2
-        inset = 6 - int(pulse * 2)
-        self._draw_cell(
-            food_x,
-            food_y,
-            self.FOOD_COLOR,
-            inset=inset,
-            outline="#7c2d12",
-            outline_width=2,
-        )
-        self._draw_cell(
-            food_x,
-            food_y,
-            self.FOOD_CORE_COLOR,
-            inset=inset + 5,
-            outline="",
-            outline_width=0,
-        )
-
-        if self.food_flash_frames > 0:
-            center_x, center_y = self._cell_center(food_x, food_y)
-            radius = 8 + (9 - self.food_flash_frames) * 4
-            self.canvas.create_oval(
-                center_x - radius,
-                center_y - radius,
-                center_x + radius,
-                center_y + radius,
-                outline="#ffd166",
-                width=2,
-            )
-
-    def _draw_snake(self) -> None:
-        for index, (x, y) in enumerate(self.game.snake):
-            if index == 0:
-                color = self.SNAKE_HEAD_COLOR
-                outline = "#d9ffcc"
-                inset = 2
-            else:
-                blend = min(index / max(len(self.game.snake) - 1, 1), 1.0)
-                color = self._blend_color(
-                    self.SNAKE_BODY_START,
-                    self.SNAKE_BODY_END,
-                    blend,
-                )
-                outline = "#12553f"
-                inset = 3
-
-            self._draw_cell(x, y, color, inset=inset, outline=outline, outline_width=2)
-
-            if index == 0:
-                self._draw_head_details(x, y)
-
-    def _draw_head_details(self, x: int, y: int) -> None:
-        center_x, center_y = self._cell_center(x, y)
-        eye_offset = 4
-        eye_gap = 5
-        if self.game.direction == UP:
-            eye_positions = [(-eye_gap, -eye_offset), (eye_gap, -eye_offset)]
-        elif self.game.direction == DOWN:
-            eye_positions = [(-eye_gap, eye_offset), (eye_gap, eye_offset)]
-        elif self.game.direction == LEFT:
-            eye_positions = [(-eye_offset, -eye_gap), (-eye_offset, eye_gap)]
-        else:
-            eye_positions = [(eye_offset, -eye_gap), (eye_offset, eye_gap)]
-
-        for dx, dy in eye_positions:
-            self.canvas.create_oval(
-                center_x + dx - 2,
-                center_y + dy - 2,
-                center_x + dx + 2,
-                center_y + dy + 2,
-                fill="#11250f",
-                outline="",
-            )
-
-    def _draw_particles(self) -> None:
-        for particle in self.particles:
-            radius = max(1.5, particle["life"] * 4)
-            self.canvas.create_oval(
-                particle["x"] - radius,
-                particle["y"] - radius,
-                particle["x"] + radius,
-                particle["y"] + radius,
-                fill=particle["color"],
-                outline="",
-            )
-
-    def _draw_level_banner(self) -> None:
-        if self.level_banner_frames <= 0:
-            return
-
-        alpha_factor = min(self.level_banner_frames / 45, 1.0)
-        text_color = self._blend_color(self.BANNER_COLOR, self.TEXT_COLOR, 1 - alpha_factor)
-        self.canvas.create_text(
-            self.game.width * self.CELL_SIZE / 2,
-            24,
-            text=f"Level {self.game.level}",
-            fill=text_color,
-            font=("Helvetica", 18, "bold"),
-        )
-
-    def _draw_overlay(self) -> None:
-        message = ""
-        sub_message = ""
-        if not self.started:
-            message = "Press an arrow key to start"
-            sub_message = "Space pauses, R resets, Esc exits"
-        elif self.game.won:
-            message = "Board Cleared"
-            sub_message = "Press Enter or R for a fresh run"
-        elif self.game.game_over:
-            message = "Game Over"
-            sub_message = "Press Enter or R to try again"
-        elif not self.running:
-            message = "Paused"
-            sub_message = "Press Space to continue"
-
-        if not message:
-            return
-
-        width = self.game.width * self.CELL_SIZE
-        height = self.game.height * self.CELL_SIZE
-        self.canvas.create_rectangle(
-            18,
-            height / 2 - 62,
-            width - 18,
-            height / 2 + 62,
-            fill=self.OVERLAY_COLOR,
-            outline=self.BOARD_BORDER_COLOR,
-            width=2,
-            stipple="gray50",
-        )
-        self.canvas.create_text(
-            width / 2,
-            height / 2 - 12,
-            text=message,
-            fill=self.TEXT_COLOR,
-            font=("Helvetica", 22, "bold"),
-        )
-        self.canvas.create_text(
-            width / 2,
-            height / 2 + 20,
-            text=sub_message,
-            fill=self.MUTED_TEXT_COLOR,
-            font=("Helvetica", 11),
-        )
-
-    def _draw_cell(
-        self,
-        x: int,
-        y: int,
-        color: str,
-        inset: int = 1,
-        outline: str = "",
-        outline_width: int = 1,
-    ) -> None:
-        left = x * self.CELL_SIZE + inset
-        top = y * self.CELL_SIZE + inset
-        right = (x + 1) * self.CELL_SIZE - inset
-        bottom = (y + 1) * self.CELL_SIZE - inset
-        self.canvas.create_rectangle(
-            left,
-            top,
-            right,
-            bottom,
-            fill=color,
-            outline=outline,
-            width=outline_width,
-        )
-
-    def _cell_center(self, x: int, y: int) -> tuple[float, float]:
-        return (
-            x * self.CELL_SIZE + self.CELL_SIZE / 2,
-            y * self.CELL_SIZE + self.CELL_SIZE / 2,
-        )
-
-    def _spawn_particles(self, position: tuple[int, int]) -> None:
-        center_x, center_y = self._cell_center(*position)
-        for index in range(10):
-            angle = (math.tau / 10) * index
-            speed = 1.3 + (index % 3) * 0.35
-            self.particles.append(
-                {
-                    "x": center_x,
-                    "y": center_y,
-                    "dx": math.cos(angle) * speed,
-                    "dy": math.sin(angle) * speed,
-                    "life": 1.0,
-                    "color": self.FOOD_CORE_COLOR if index % 2 == 0 else self.FOOD_COLOR,
-                }
-            )
-
-    def _advance_particles(self) -> None:
-        next_particles: list[dict[str, float]] = []
-        for particle in self.particles:
-            particle["x"] += particle["dx"]
-            particle["y"] += particle["dy"]
-            particle["dy"] += 0.03
-            particle["life"] -= 0.06
-            if particle["life"] > 0:
-                next_particles.append(particle)
-        self.particles = next_particles
-
-    def _persist_best_score(self) -> None:
+    def _persist_best_locked(self) -> None:
         if self.game.score > self.best_score:
             self.best_score = self.score_storage.save_best_score(self.game.score)
 
-    def _update_hud(self) -> None:
-        self.title_var.set("Snake Arcade")
-        self.stats_var.set(
-            "  ".join(
-                [
-                    f"Score {self.game.score:04d}",
-                    f"Best {self.best_score:04d}",
-                    f"Level {self.game.level}",
-                    f"Speed {self.game.speed_ms}ms",
-                ]
-            )
-        )
+    def _state_locked(self) -> dict[str, Any]:
+        return {
+            "width": self.game.width,
+            "height": self.game.height,
+            "snake": self.game.snake,
+            "food": self.game.food,
+            "score": self.game.score,
+            "best_score": self.best_score,
+            "level": self.game.level,
+            "speed_ms": self.game.speed_ms,
+            "started": self.started,
+            "running": self.running,
+            "game_over": self.game.game_over,
+            "won": self.game.won,
+            "foods_per_level": self.game.config.foods_per_level,
+            "progress_to_next_level": self.game.progress_to_next_level,
+            "level_up_flash": self.level_up_flash,
+            "tick": self.tick_counter,
+            "direction": self.last_direction_name,
+        }
 
-        if not self.started:
-            footer = "Guide the snake through a clean arcade run."
-        elif self.game.won:
-            footer = "Perfect clear. You filled the whole board."
-        elif self.game.game_over:
-            footer = "One more run? The speed curve gets sharper as the level climbs."
-        elif not self.running:
-            footer = "Paused. Resume when you're ready."
-        else:
-            foods_needed = self.game.config.foods_per_level - self.game.progress_to_next_level
-            footer = (
-                f"Eat {foods_needed} more food"
-                f"{'' if foods_needed == 1 else 's'} to reach the next level."
-            )
-        self.footer_var.set(footer)
 
-    def _blend_color(self, start: str, end: str, factor: float) -> str:
-        factor = max(0.0, min(1.0, factor))
-        start_rgb = self._hex_to_rgb(start)
-        end_rgb = self._hex_to_rgb(end)
-        mixed = tuple(
-            int(start_value + (end_value - start_value) * factor)
-            for start_value, end_value in zip(start_rgb, end_rgb)
-        )
-        return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
+def make_handler(controller: BrowserSnakeController) -> type[BaseHTTPRequestHandler]:
+    class SnakeHandler(BaseHTTPRequestHandler):
+        def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
+            data = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
-    def _hex_to_rgb(self, value: str) -> tuple[int, int, int]:
-        value = value.lstrip("#")
-        return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+        def _send_html(self, content: str) -> None:
+            data = content.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path in ("/", "/index.html"):
+                self._send_html(HTML_PAGE)
+                return
+            if self.path == "/api/state":
+                self._send_json(controller.get_state())
+                return
+            self.send_error(HTTPStatus.NOT_FOUND)
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path != "/api/action":
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length) if content_length else b"{}"
+            try:
+                payload = json.loads(raw_body.decode("utf-8"))
+            except json.JSONDecodeError:
+                self.send_error(HTTPStatus.BAD_REQUEST)
+                return
+
+            action = str(payload.get("action", ""))
+            state = controller.handle_action(action, payload)
+            self._send_json(state)
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+            return
+
+    return SnakeHandler
 
 
 def main() -> None:
-    app = SnakeApp()
-    app.run()
+    controller = BrowserSnakeController()
+    handler = make_handler(controller)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    port = server.server_address[1]
+    url = f"http://127.0.0.1:{port}"
+    print(f"Snake Arcade browser UI running at {url}")
+    webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
