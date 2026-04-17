@@ -11,6 +11,8 @@ class SnakeGameTests(unittest.TestCase):
         self.assertIsNotNone(game.food)
         self.assertNotIn(game.food, game.snake)
         self.assertEqual(game.score, 0)
+        self.assertEqual(game.level, 1)
+        self.assertEqual(game.speed_ms, 180)
         self.assertFalse(game.game_over)
 
     def test_tick_moves_snake_forward(self) -> None:
@@ -21,15 +23,18 @@ class SnakeGameTests(unittest.TestCase):
 
         self.assertEqual(game.snake, [(5, 5), (4, 5), (3, 5)])
         self.assertEqual(game.score, 0)
+        self.assertEqual(game.steps, 1)
 
     def test_eating_food_increases_score_and_length(self) -> None:
         game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))
         game.food = (5, 5)
 
-        game.tick()
+        result = game.tick()
 
         self.assertEqual(game.snake, [(5, 5), (4, 5), (3, 5), (2, 5)])
-        self.assertEqual(game.score, 1)
+        self.assertEqual(game.score, 10)
+        self.assertEqual(game.foods_eaten, 1)
+        self.assertTrue(result.ate_food)
         self.assertIsNotNone(game.food)
         self.assertNotIn(game.food, game.snake)
 
@@ -107,10 +112,58 @@ class SnakeGameTests(unittest.TestCase):
         self.assertFalse(game.won)
         self.assertEqual(game.direction, RIGHT)
         self.assertEqual(len(game.snake), 3)
+        self.assertEqual(game.level, 1)
+        self.assertEqual(game.steps, 0)
 
     def test_invalid_initial_length_raises(self) -> None:
         with self.assertRaises(ValueError):
             SnakeGame(GameConfig(width=3, height=3, initial_length=4))
+
+    def test_level_increases_and_speed_gets_faster(self) -> None:
+        game = SnakeGame(
+            GameConfig(
+                width=10,
+                height=10,
+                initial_length=3,
+                random_seed=1,
+                foods_per_level=2,
+                speed_step_ms=15,
+            )
+        )
+
+        game.food = (5, 5)
+        first_result = game.tick()
+        game.food = (6, 5)
+        second_result = game.tick()
+
+        self.assertEqual(game.level, 2)
+        self.assertEqual(game.score, 20)
+        self.assertFalse(first_result.level_up)
+        self.assertTrue(second_result.level_up)
+        self.assertEqual(game.speed_ms, 165)
+
+    def test_speed_respects_minimum_value(self) -> None:
+        game = SnakeGame(
+            GameConfig(
+                width=10,
+                height=10,
+                initial_length=3,
+                random_seed=1,
+                foods_per_level=1,
+                base_speed_ms=120,
+                speed_step_ms=30,
+                min_speed_ms=60,
+            )
+        )
+
+        game.foods_eaten = 6
+
+        self.assertEqual(game.level, 7)
+        self.assertEqual(game.speed_ms, 60)
+
+    def test_invalid_speed_configuration_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            SnakeGame(GameConfig(base_speed_ms=50, min_speed_ms=60))
 
     def test_change_direction_by_key(self) -> None:
         game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))

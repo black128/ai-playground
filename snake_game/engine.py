@@ -32,12 +32,31 @@ class GameConfig:
     height: int = 20
     initial_length: int = 3
     random_seed: Optional[int] = None
+    points_per_food: int = 10
+    foods_per_level: int = 4
+    base_speed_ms: int = 180
+    speed_step_ms: int = 12
+    min_speed_ms: int = 72
+
+
+@dataclass(frozen=True)
+class TickResult:
+    moved: bool
+    ate_food: bool
+    game_over: bool
+    won: bool
+    level_up: bool
+    score: int
+    level: int
+    consumed_food_position: Optional[Position] = None
 
 
 @dataclass
 class SnakeGame:
     config: GameConfig = field(default_factory=GameConfig)
     score: int = 0
+    foods_eaten: int = 0
+    steps: int = 0
     game_over: bool = False
     won: bool = False
     direction: Position = RIGHT
@@ -56,16 +75,41 @@ class SnakeGame:
     def height(self) -> int:
         return self.config.height
 
+    @property
+    def level(self) -> int:
+        return 1 + (self.foods_eaten // self.config.foods_per_level)
+
+    @property
+    def speed_ms(self) -> int:
+        reduction = (self.level - 1) * self.config.speed_step_ms
+        return max(self.config.min_speed_ms, self.config.base_speed_ms - reduction)
+
+    @property
+    def progress_to_next_level(self) -> int:
+        return self.foods_eaten % self.config.foods_per_level
+
     def reset(self) -> None:
         if self.config.initial_length < 2:
             raise ValueError("initial_length must be at least 2")
         if self.config.initial_length > self.config.width:
             raise ValueError("initial_length cannot exceed board width")
+        if self.config.foods_per_level < 1:
+            raise ValueError("foods_per_level must be at least 1")
+        if self.config.points_per_food < 1:
+            raise ValueError("points_per_food must be at least 1")
+        if self.config.min_speed_ms < 20:
+            raise ValueError("min_speed_ms must be at least 20")
+        if self.config.base_speed_ms < self.config.min_speed_ms:
+            raise ValueError("base_speed_ms cannot be lower than min_speed_ms")
+        if self.config.speed_step_ms < 0:
+            raise ValueError("speed_step_ms cannot be negative")
 
         start_x = self.config.initial_length + 1
         start_y = self.config.height // 2
         self.direction = RIGHT
         self.score = 0
+        self.foods_eaten = 0
+        self.steps = 0
         self.game_over = False
         self.won = False
         self.snake = [
@@ -84,10 +128,19 @@ class SnakeGame:
         if key in DIRECTIONS:
             self.set_direction(DIRECTIONS[key])
 
-    def tick(self) -> None:
+    def tick(self) -> TickResult:
         if self.game_over or self.won:
-            return
+            return TickResult(
+                moved=False,
+                ate_food=False,
+                game_over=self.game_over,
+                won=self.won,
+                level_up=False,
+                score=self.score,
+                level=self.level,
+            )
 
+        previous_level = self.level
         next_head = self._next_head_position()
         grow = next_head == self.food
         body_to_check: Sequence[Position]
@@ -98,16 +151,38 @@ class SnakeGame:
 
         if not self._is_inside_board(next_head) or next_head in body_to_check:
             self.game_over = True
-            return
+            return TickResult(
+                moved=False,
+                ate_food=False,
+                game_over=True,
+                won=False,
+                level_up=False,
+                score=self.score,
+                level=self.level,
+            )
 
         self.snake.insert(0, next_head)
+        self.steps += 1
         if grow:
-            self.score += 1
+            self.score += self.config.points_per_food
+            self.foods_eaten += 1
             self.food = self._spawn_food()
             if self.food is None:
                 self.won = True
         else:
             self.snake.pop()
+
+        current_level = self.level
+        return TickResult(
+            moved=True,
+            ate_food=grow,
+            game_over=self.game_over,
+            won=self.won,
+            level_up=current_level > previous_level,
+            score=self.score,
+            level=current_level,
+            consumed_food_position=next_head if grow else None,
+        )
 
     def _next_head_position(self) -> Position:
         head_x, head_y = self.snake[0]
@@ -128,4 +203,3 @@ class SnakeGame:
         if not available_positions:
             return None
         return self._rng.choice(available_positions)
-

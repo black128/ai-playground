@@ -2,7 +2,7 @@ import curses
 import unittest
 
 from snake_game.engine import GameConfig, SnakeGame
-from snake_game.terminal_app import direction_from_key, render_board
+from snake_game.terminal_app import direction_from_key, food_glyph, render_board
 
 
 class SnakeTerminalAppTests(unittest.TestCase):
@@ -42,6 +42,11 @@ class SnakeTerminalAppTests(unittest.TestCase):
         self.assertEqual(direction_from_key(curses.KEY_UP), (0, -1))
         self.assertEqual(direction_from_key(ord("a")), (-1, 0))
         self.assertIsNone(direction_from_key(ord("x")))
+
+    def test_food_glyph_animates_without_breaking_default_frame(self) -> None:
+        self.assertEqual(food_glyph(0), "*")
+        self.assertEqual(food_glyph(1), "+")
+        self.assertEqual(food_glyph(2), "x")
 
 
 if __name__ == "__main__":
