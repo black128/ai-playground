@@ -14,11 +14,20 @@
 python3 main.py
 ```
 
+默认启动终端版，兼容性最好。
+
+如果需要图形界面版：
+
+```bash
+python3 main.py --mode gui
+```
+
 ## 游戏操作
 
-- 方向键：控制蛇移动
+- 方向键 / `WASD`：控制蛇移动
 - `Space`：暂停 / 继续
 - `R`：重新开始
+- `Q`：退出终端版
 
 ## 运行测试
 
@@ -35,7 +44,9 @@ python3 -m unittest discover -s tests -v
 ├── snake_game
 │   ├── __init__.py
 │   ├── app.py
-│   └── engine.py
+│   ├── engine.py
+│   └── terminal_app.py
 └── tests
-    └── test_engine.py
+    ├── test_engine.py
+    └── test_terminal_app.py
 ```

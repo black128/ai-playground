@@ -8,12 +8,14 @@ from snake_game.engine import DIRECTIONS, GameConfig, SnakeGame
 class SnakeApp:
     CELL_SIZE = 24
     UPDATE_DELAY_MS = 140
-    BG_COLOR = "#111827"
-    GRID_COLOR = "#1f2937"
-    SNAKE_HEAD_COLOR = "#22c55e"
-    SNAKE_BODY_COLOR = "#4ade80"
-    FOOD_COLOR = "#ef4444"
-    TEXT_COLOR = "#f9fafb"
+    BG_COLOR = "#f4efe6"
+    BOARD_BORDER_COLOR = "#5b4636"
+    GRID_LIGHT_COLOR = "#efe4c8"
+    GRID_DARK_COLOR = "#dfcf9f"
+    SNAKE_HEAD_COLOR = "#1f7a3d"
+    SNAKE_BODY_COLOR = "#39a357"
+    FOOD_COLOR = "#d62828"
+    TEXT_COLOR = "#2f241d"
 
     def __init__(self) -> None:
         self.game = SnakeGame(GameConfig(width=20, height=20, initial_length=3))
@@ -32,8 +34,9 @@ class SnakeApp:
             self.root,
             width=canvas_width,
             height=canvas_height,
-            bg=self.BG_COLOR,
-            highlightthickness=0,
+            bg=self.GRID_LIGHT_COLOR,
+            highlightthickness=4,
+            highlightbackground=self.BOARD_BORDER_COLOR,
         )
         self.canvas.pack(padx=12, pady=(12, 6))
 
@@ -50,6 +53,7 @@ class SnakeApp:
 
         self.root.configure(bg=self.BG_COLOR)
         self.root.bind("<KeyPress>", self._handle_keypress)
+        self._show_window()
 
         self._draw()
         self._schedule_next_tick()
@@ -70,6 +74,20 @@ class SnakeApp:
             self._draw()
             if self.running and not (self.game.game_over or self.game.won):
                 self._schedule_next_tick()
+
+    def _show_window(self) -> None:
+        window_width = self.game.width * self.CELL_SIZE + 24
+        window_height = self.game.height * self.CELL_SIZE + 72
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        pos_x = max((screen_width - window_width) // 2, 0)
+        pos_y = max((screen_height - window_height) // 2, 0)
+        self.root.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
+        self.root.update_idletasks()
+        self.root.lift()
+        self.root.focus_force()
+        self.root.attributes("-topmost", True)
+        self.root.after(300, lambda: self.root.attributes("-topmost", False))
 
     def _schedule_next_tick(self) -> None:
         self.root.after(self.UPDATE_DELAY_MS, self._game_loop)
@@ -98,25 +116,59 @@ class SnakeApp:
     def _draw_grid(self) -> None:
         for x in range(self.game.width):
             for y in range(self.game.height):
-                self._draw_cell(x, y, self.GRID_COLOR)
+                color = (
+                    self.GRID_LIGHT_COLOR if (x + y) % 2 == 0 else self.GRID_DARK_COLOR
+                )
+                self._draw_cell(
+                    x,
+                    y,
+                    color,
+                    inset=0,
+                    outline=self.BOARD_BORDER_COLOR,
+                    outline_width=1,
+                )
 
     def _draw_food(self) -> None:
         if self.game.food is None:
             return
         food_x, food_y = self.game.food
-        self._draw_cell(food_x, food_y, self.FOOD_COLOR, inset=4)
+        self._draw_cell(
+            food_x,
+            food_y,
+            self.FOOD_COLOR,
+            inset=5,
+            outline="#7f1d1d",
+            outline_width=2,
+        )
 
     def _draw_snake(self) -> None:
         for index, (x, y) in enumerate(self.game.snake):
             color = self.SNAKE_HEAD_COLOR if index == 0 else self.SNAKE_BODY_COLOR
-            self._draw_cell(x, y, color, inset=2)
+            outline = "#14532d" if index == 0 else "#166534"
+            self._draw_cell(x, y, color, inset=2, outline=outline, outline_width=2)
 
-    def _draw_cell(self, x: int, y: int, color: str, inset: int = 1) -> None:
+    def _draw_cell(
+        self,
+        x: int,
+        y: int,
+        color: str,
+        inset: int = 1,
+        outline: str = "",
+        outline_width: int = 1,
+    ) -> None:
         left = x * self.CELL_SIZE + inset
         top = y * self.CELL_SIZE + inset
         right = (x + 1) * self.CELL_SIZE - inset
         bottom = (y + 1) * self.CELL_SIZE - inset
-        self.canvas.create_rectangle(left, top, right, bottom, fill=color, outline="")
+        self.canvas.create_rectangle(
+            left,
+            top,
+            right,
+            bottom,
+            fill=color,
+            outline=outline,
+            width=outline_width,
+        )
 
     def _update_status(self) -> None:
         if self.game.won:
@@ -143,4 +195,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
