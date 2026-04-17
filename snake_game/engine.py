@@ -117,16 +117,20 @@ class SnakeGame:
         ]
         self.food = self._spawn_food()
 
-    def set_direction(self, new_direction: Position) -> None:
+    def set_direction(self, new_direction: Position) -> bool:
         if self.game_over or self.won:
-            return
+            return False
         if new_direction == OPPOSITES[self.direction]:
-            return
+            return False
+        if new_direction == self.direction:
+            return False
         self.direction = new_direction
+        return True
 
-    def change_direction_by_key(self, key: str) -> None:
+    def change_direction_by_key(self, key: str) -> bool:
         if key in DIRECTIONS:
-            self.set_direction(DIRECTIONS[key])
+            return self.set_direction(DIRECTIONS[key])
+        return False
 
     def tick(self) -> TickResult:
         if self.game_over or self.won:

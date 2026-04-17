@@ -1127,9 +1127,10 @@ class BrowserSnakeController:
                 if direction_name in DIRECTIONS:
                     if not self.started or self.game.game_over or self.game.won:
                         self._start_run_locked()
-                    self.game.change_direction_by_key(direction_name)
-                    self.last_direction_name = direction_name
-                    self.next_tick_at = time.monotonic() + (self.game.speed_ms / 1000)
+                    changed = self.game.change_direction_by_key(direction_name)
+                    if changed:
+                        self.last_direction_name = direction_name
+                        self.next_tick_at = time.monotonic() + (self.game.speed_ms / 1000)
 
             self._advance_locked()
             return self._state_locked()

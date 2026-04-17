@@ -41,15 +41,17 @@ class SnakeGameTests(unittest.TestCase):
     def test_reverse_direction_is_ignored(self) -> None:
         game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))
 
-        game.set_direction(LEFT)
+        changed = game.set_direction(LEFT)
 
+        self.assertFalse(changed)
         self.assertEqual(game.direction, RIGHT)
 
     def test_valid_direction_change_is_applied(self) -> None:
         game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))
 
-        game.set_direction(UP)
+        changed = game.set_direction(UP)
 
+        self.assertTrue(changed)
         self.assertEqual(game.direction, UP)
 
     def test_wall_collision_sets_game_over(self) -> None:
@@ -168,9 +170,18 @@ class SnakeGameTests(unittest.TestCase):
     def test_change_direction_by_key(self) -> None:
         game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))
 
-        game.change_direction_by_key("Up")
+        changed = game.change_direction_by_key("Up")
 
+        self.assertTrue(changed)
         self.assertEqual(game.direction, UP)
+
+    def test_same_direction_change_returns_false(self) -> None:
+        game = SnakeGame(GameConfig(width=10, height=10, initial_length=3, random_seed=1))
+
+        changed = game.set_direction(RIGHT)
+
+        self.assertFalse(changed)
+        self.assertEqual(game.direction, RIGHT)
 
 
 if __name__ == "__main__":

@@ -61,6 +61,16 @@ class BrowserSnakeControllerTests(unittest.TestCase):
             self.assertEqual(len(state["leaderboard_current"]), 1)
             self.assertEqual(state["leaderboard_current"][0]["score"], 160)
 
+    def test_reverse_direction_does_not_reset_tick_timer(self) -> None:
+        controller = BrowserSnakeController()
+        controller.handle_action("start", {})
+        original_next_tick = controller.next_tick_at
+
+        state = controller.handle_action("direction", {"key": "ArrowLeft"})
+
+        self.assertEqual(state["direction"], "Right")
+        self.assertEqual(controller.next_tick_at, original_next_tick)
+
 
 if __name__ == "__main__":
     unittest.main()
