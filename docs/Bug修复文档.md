@@ -114,20 +114,7 @@
 - 实际启动 `python3 main.py`
 - 确认程序不再因为 `curs_set()` 报错退出
 
-## 3. 回归测试策略
-
-每次修改核心逻辑后，至少执行以下验证：
-
-```bash
-python3 -m unittest discover -s tests -v
-PYTHONPYCACHEPREFIX=/tmp/python-cache python3 -m compileall .
-```
-
-## 4. 结论
-
-当前版本重点修复了方向控制、碰撞判定、食物生成、胜利判定和配置边界等核心风险点，并通过自动化测试进行回归验证。
-
-## 2.8 难度递增后速度失控或不生效
+### 2.8 难度递增后速度失控或不生效
 
 问题描述：
 
@@ -144,7 +131,7 @@ PYTHONPYCACHEPREFIX=/tmp/python-cache python3 -m compileall .
 - 单元测试 `test_level_increases_and_speed_gets_faster`
 - 单元测试 `test_speed_respects_minimum_value`
 
-## 2.9 最高分文件异常导致程序不可用
+### 2.9 最高分文件异常导致程序不可用
 
 问题描述：
 
@@ -162,7 +149,7 @@ PYTHONPYCACHEPREFIX=/tmp/python-cache python3 -m compileall .
 - 单元测试 `test_invalid_json_returns_zero`
 - 单元测试 `test_save_best_score_persists_highest_value`
 
-## 2.10 动画层与游戏逻辑耦合导致节奏异常
+### 2.10 动画层与游戏逻辑耦合导致节奏异常
 
 问题描述：
 
@@ -170,11 +157,57 @@ PYTHONPYCACHEPREFIX=/tmp/python-cache python3 -m compileall .
 
 修复方案：
 
-- GUI 模式拆分为逻辑时钟和渲染时钟
+- 浏览器模式使用固定帧渲染，逻辑推进由服务端时钟控制
 - 终端模式使用固定刷新频率，并基于时间戳决定何时真正推进游戏
 - 引擎通过 `TickResult` 向界面层暴露“吃到食物”“升级”等事件，避免界面重复推断
 
 验证方式：
 
-- GUI 启动烟测
+- 浏览器版接口烟测
 - 终端实际运行烟测
+
+### 2.11 难度切换和排行榜状态不一致
+
+问题描述：
+
+在引入开始菜单和多难度后，如果切换难度时没有同步刷新待机棋盘和排行榜，界面会显示上一局配置，导致用户误判当前模式。
+
+修复方案：
+
+- 由 `BrowserSnakeController` 统一维护 `selected_difficulty` 和 `active_difficulty`
+- 切换难度时在非运行状态下立即重建待机棋盘
+- 状态接口直接返回当前难度排行榜，避免前端自行拼装
+
+验证方式：
+
+- 单元测试 `test_set_difficulty_updates_selected_profile`
+- 单元测试 `test_state_includes_current_difficulty_leaderboard`
+
+### 2.12 排行榜写入后排序错误或数据污染
+
+问题描述：
+
+如果排行榜只简单追加记录而不做排序和过滤，页面会出现低分压高分、跨难度混排或损坏数据污染显示的问题。
+
+修复方案：
+
+- 在 `ScoreStorage.record_run()` 中统一维护排序
+- `load_leaderboard()` 支持按难度过滤
+- 对异常条目做解析保护，坏数据直接跳过
+
+验证方式：
+
+- 单元测试 `test_record_run_builds_sorted_leaderboard`
+
+## 3. 回归测试策略
+
+每次修改核心逻辑后，至少执行以下验证：
+
+```bash
+python3 -m unittest discover -s tests -v
+PYTHONPYCACHEPREFIX=/tmp/python-cache python3 -m compileall .
+```
+
+## 4. 结论
+
+当前版本重点修复了方向控制、碰撞判定、食物生成、胜利判定、配置边界、图形渲染兼容性以及产品化菜单/排行榜状态一致性等风险点，并通过自动化测试和本地烟测进行回归验证。
